@@ -53,3 +53,13 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# STM32CubeIDE generated build files
+**/Debug/
+**/Release/
+
+# Local IDE workspace settings
+**/.metadata/
+
+# macOS folder metadata
+.DS_Store
