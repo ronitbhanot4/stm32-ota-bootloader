@@ -108,10 +108,13 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	  if (HAL_UART_Receive(&huart1, &received, 1, 100) == HAL_OK)
 	  {
-	      if (received == 'T')
-	      {
-	          HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-	      }
+		  if (received == 'T')
+		  {
+		      HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+
+		      uint8_t reply = 'A';
+		      HAL_UART_Transmit(&huart1, &reply, 1, 100);
+		  }
 	  }
   }
   /* USER CODE END 3 */
