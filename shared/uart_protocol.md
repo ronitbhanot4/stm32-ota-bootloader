@@ -37,17 +37,19 @@ Biggest frame: 6 + 256 + 4 = 266 bytes.
 
 | `type` | Name | Payload |
 |---|---|---|
-| `0x80` | `ACK` | none — "done, send the next one" |
-| `0x81` | `NAK` | 1 byte: reason code |
+| `0x80` | `ACK` | 1 byte: the `type` it answers — "done, send the next one" |
+| `0x81` | `NAK` | 2 bytes: the `type` it answers, then a reason code |
+
+Why replies name the `type`: `START`, `END` and the first `DATA` all use `seq` 0. Without it, a late `ACK` for `START` could be mistaken for the `ACK` of `DATA` 0.
 
 | Reason | Name | Meaning | PC should |
 |---|---|---|---|
 | 1 | `FRAME_CRC` | Frame arrived damaged | Resend the same frame |
 | 2 | `BAD_SEQ` | Chunk out of order | Give up |
-| 3 | `BAD_HEADER` | Header failed a check | Give up |
+| 3 | `BAD_HEADER` | Header failed a check (includes payload over 192 KB) | Give up |
 | 4 | `WRONG_SLOT` | Image built for the other slot | Give up |
-| 5 | `TOO_BIG` | Payload over 192 KB, or a chunk past the end | Give up |
-| 6 | `FLASH_ERROR` | Erase or write failed | Give up |
+| 5 | `TOO_BIG` | A chunk would go past `payload_size` | Give up |
+| 6 | `FLASH_ERROR` | Erase or write failed, or the target bytes weren't erased | Give up |
 | 7 | `IMAGE_CRC` | Read-back CRC doesn't match the header | Give up |
 | 8 | `NOT_STARTED` | `DATA`/`END` before a good `START` | Give up |
 
@@ -58,10 +60,13 @@ Biggest frame: 6 + 256 + 4 = 266 bytes.
 - Wait up to **15 s** after `START` (erasing two 128 KB sectors takes seconds), **1 s** after `DATA`, **3 s** after `END`.
 - No reply, or `NAK FRAME_CRC` → resend the same frame. Give up after 5 tries.
 - Any other `NAK` → stop and print the reason.
+- Ignore replies whose `type` and `seq` don't match the frame it's waiting on.
 
 **Board (receiver)**
 - Ignore bytes until it sees `0xA5`. A `len` over 256 → throw the frame away and look for the next `0xA5`.
 - More than **100 ms** of silence in the middle of a frame → throw it away. (Junk bytes, like the ones seen when a board resets, can't jam the receiver.)
+- A frame with a bad `crc32` → `NAK FRAME_CRC`, echoing the `type` and `seq` as received.
+- `START` again → check, re-erase, start over from `seq` 0.
 - `DATA` with `seq` = the one expected → write it, `ACK`, expect `seq + 1`.
 - `DATA` with `seq` = the one **just** written → don't write again, just `ACK` again. (The PC never got the first `ACK` and resent.)
 - Any other `seq` → `NAK BAD_SEQ`.
@@ -73,14 +78,14 @@ Biggest frame: 6 + 256 + 4 = 266 bytes.
 
 ```
 PC  → START seq 0  [128-byte header]      board erases Slot B (~2-4 s)
-PC  ← ACK   seq 0
+PC  ← ACK   seq 0  [START]
 PC  → DATA  seq 0  [bytes 0–255]
-PC  ← ACK   seq 0
+PC  ← ACK   seq 0  [DATA]
 ...
 PC  → DATA  seq 33 [bytes 8448–8567, 120 bytes]
-PC  ← ACK   seq 33
+PC  ← ACK   seq 33 [DATA]
 PC  → END   seq 0
-PC  ← ACK   seq 0                          read-back CRC matched
+PC  ← ACK   seq 0  [END]                   read-back CRC matched
 ```
 
 ## Open questions for Ronit

@@ -56,27 +56,23 @@ def build_image(binary, slot, fw_version):
     return header + payload
 
 
-def parse_image(image):
-    if len(image) < HEADER_SIZE:
-        raise ImageError("file is shorter than a header")
+def parse_header(header):
+    if len(header) < HEADER_SIZE:
+        raise ImageError("shorter than a header")
     magic, hver, hsize, fw_version, size, pcrc, load_addr, flags = \
-        HEADER_FIELDS.unpack_from(image, 0)
-    (hcrc,) = struct.unpack_from("<I", image, 28)
+        HEADER_FIELDS.unpack_from(header, 0)
+    (hcrc,) = struct.unpack_from("<I", header, 28)
     if magic != MAGIC:
         raise ImageError(f"bad magic {magic!r}")
     if hver != HEADER_VERSION or hsize != HEADER_SIZE:
         raise ImageError(f"unsupported header version {hver} / size {hsize}")
-    if hcrc != crc32(image[:28]):
+    if hcrc != crc32(header[:28]):
         raise ImageError("header CRC mismatch")
-    payload = image[HEADER_SIZE:]
-    if len(payload) != size:
-        raise ImageError(f"header says {size} payload bytes, file has {len(payload)}")
-    if crc32(payload) != pcrc:
-        raise ImageError("payload CRC mismatch")
+    if size == 0 or size % 4 or size > MAX_PAYLOAD:
+        raise ImageError(f"bad payload size {size}")
     slot = next((s for s, a in SLOTS.items() if a == load_addr), None)
     if slot is None:
         raise ImageError(f"load address 0x{load_addr:08X} is not a slot")
-    check_vectors(payload, slot)
     return {
         "fw_version": fw_version,
         "payload_size": size,
@@ -85,6 +81,19 @@ def parse_image(image):
         "slot": slot,
         "header_crc32": hcrc,
     }
+
+
+def parse_image(image):
+    info = parse_header(image)
+    payload = image[HEADER_SIZE:]
+    if len(payload) != info["payload_size"]:
+        raise ImageError(
+            f"header says {info['payload_size']} payload bytes, file has {len(payload)}"
+        )
+    if crc32(payload) != info["payload_crc32"]:
+        raise ImageError("payload CRC mismatch")
+    check_vectors(payload, info["slot"])
+    return info
 
 
 def describe(info):
