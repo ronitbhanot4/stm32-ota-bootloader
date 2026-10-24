@@ -57,3 +57,8 @@ dkms.conf
 # Python
 __pycache__/
 *.img
+
+# Signing keys (Milestone 5) - never commit a private key
+*.pem
+*.key
+keys/
