@@ -63,3 +63,7 @@ dkms.conf
 
 # macOS folder metadata
 .DS_Store
+
+# Python
+__pycache__/
+*.img
