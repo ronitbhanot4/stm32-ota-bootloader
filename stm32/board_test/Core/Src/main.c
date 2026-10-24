@@ -93,6 +93,9 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  uint32_t last_print = HAL_GetTick();
+  const char msg[] = "APP A\r\n";
   /* USER CODE BEGIN 2 */
   uint8_t received;
   /* USER CODE END 2 */
@@ -116,7 +119,13 @@ int main(void)
 		      HAL_UART_Transmit(&huart1, &reply, 1, 100);
 		  }
 	  }
+	  if (HAL_GetTick() - last_print >= 1000)
+	  {
+		  last_print += 1000;
+		  HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg) - 1, 100);
+	  }
   }
+
   /* USER CODE END 3 */
 }
 
