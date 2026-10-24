@@ -31,7 +31,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#ifdef APP_SLOT_B
+#define APP_NAME "APP B"
+#else
+#define APP_NAME "APP A"
+#endif
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,7 +47,7 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+extern uint32_t g_pfnVectors[];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,7 +71,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  SCB->VTOR = 0x08010000;
+  SCB->VTOR = (uint32_t)g_pfnVectors;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -100,7 +104,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    HAL_UART_Transmit(&huart2, (uint8_t *)"APP A\r\n", 7, 100);
+    HAL_UART_Transmit(&huart2, (uint8_t *)APP_NAME "\r\n", sizeof(APP_NAME) + 1, 100);
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     HAL_Delay(1000);
   }
