@@ -22,6 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include "crc32.h"
+#include "flash_slot_b.h"
+#include "update_uart.h"
+#include "update_frame.h"
+#include "update_session.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -102,6 +107,48 @@ static void jump_to_app(void)
   __enable_irq();
   app_start();
 }
+
+static void run_update_mode(void)
+{
+    UpdateSession session = {0};
+    uint8_t buffer[UPDATE_UART_FRAME_CAPACITY];
+
+    print("BOOT: update mode\r\n");
+
+    for (;;) {
+        size_t size;
+        UpdateFrame frame;
+
+        if (!update_uart_read_frame(&huart2, buffer, &size)) {
+            continue;
+        }
+
+        UpdateFrameStatus status = update_frame_decode(buffer, size, &frame);
+        uint8_t reason;
+
+        if (status == UPDATE_FRAME_BAD_CRC) {
+            reason = 1u;  // FRAME_CRC
+        } else if (status != UPDATE_FRAME_OK) {
+            continue;
+        } else {
+            switch (frame.type) {
+            case 0x01u:  // START
+                reason = update_session_start(&session, &frame);
+                break;
+            case 0x02u:  // DATA
+                reason = update_session_data(&session, &frame);
+                break;
+            case 0x03u:  // END
+                reason = update_session_end(&session, &frame);
+                break;
+            default:
+                continue;
+            }
+        }
+
+        update_uart_send_reply(&huart2, frame.type, frame.seq, reason);
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -135,6 +182,12 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  if (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin) == GPIO_PIN_RESET) {
+      run_update_mode();
+  }
+
+
   print("\r\nBOOT: bootloader running\r\n");
   jump_to_app();
   print("BOOT: staying in bootloader\r\n");
