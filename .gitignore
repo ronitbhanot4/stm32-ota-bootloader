@@ -51,6 +51,8 @@ dkms.conf
 **/SlotB/
 # Local IDE workspace settings
 **/.metadata/
+*.sfrview.prefs
+language.settings.xml
 # macOS folder metadata
 .DS_Store
 
