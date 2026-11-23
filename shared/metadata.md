@@ -1,4 +1,4 @@
-# Boot metadata & trial-boot spec (v1 — DRAFT, needs Ronit's OK)
+# Boot metadata & trial-boot spec (v1)
 
 The exact flash layout and state machine shared by the bootloader (`stm32/bootloader`) and the application (`stm32/app`) for safe A/B updates, trial boot, and automatic rollback. **Change this file first, then both sides.**
 

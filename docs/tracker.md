@@ -58,7 +58,7 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 | 1 | Set up and prove the board | LED blinks and `"APP A"` prints once a second; both CubeIDE projects exist | Wk 1 (15–21 Oct) | **Done** |
 | 2 | Place and jump to an app | Bootloader prints, then jumps to Slot A; breakpoints work in both projects | Wk 2 (22–28 Oct) | **Done** |
 | 3 | Receive and program a second image | App B arrives over UART, lands in Slot B, read-back CRC matches (not booted yet) | Wk 3 (29 Oct–4 Nov) | **Done** |
-| 4 | Metadata + safe trial boot | Good image becomes active; a broken one rolls back on its own | Wk 4–5 (5–18 Nov) | **Not started** |
+| 4 | Metadata + safe trial boot | Good image becomes active; a broken one rolls back on its own | Wk 4–5 (5–18 Nov) | **In progress** |
 | 5 | Authenticity (signatures) | Signed image installs; a 1-byte change or wrong key is rejected | Wk 6 (19–25 Nov) | **Not started** |
 | 6 | Wi-Fi + server | Signed image downloads over Wi-Fi, trial-boots, confirms, reports status | Wk 7–8 (26 Nov–9 Dec) | **Not started** |
 | — | Failure tests + cleanup | Evidence recorded for every required test below | Wk 9 (10–16 Dec) | **Not started** |
@@ -70,7 +70,7 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 
 ## Status and next steps
 
-**Current snapshot (22 Nov 2026):** M1–M3 are complete. Ronit's receiver (`f276934`, 14 Nov) closed M3: App B arrives over UART, writes to Slot B, and the read-back CRC-32 matches the header. Next up is verifying M3 on Ismail's board, retiring `stm32/board_test`, and starting M4 together.
+**Current snapshot (22 Nov 2026):** M1–M3 are verified on both Ronit's and Ismail's boards. **Milestone 4 is underway:** [`shared/metadata.md`](../shared/metadata.md) (dual-sector ping-pong layout, 64-byte `BootMeta`, and IWDG trial-boot state machine) is agreed on. Next up is implementing the metadata driver, trial boot + IWDG rollback, app `boot_confirm()`, and host-side metadata/test tooling.
 
 ### Checklist
 
@@ -83,9 +83,12 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 - [x] **[Ronit]** Review `jump_to_app()` and [`shared/uart_protocol.md`](../shared/uart_protocol.md)
 - [x] **[Ronit]** Software CRC-32 in C (`0xCBF43926` for `"123456789"`), Slot B flash driver, UART receiver, blue-button update mode
 - [x] **[Both]** Real sender to real receiver over COM3, Slot B read-back CRC matches (M3 checkpoint)
+- [x] **[Ismail]** Pull `f276934` and repeat the M3 hardware test on Ismail's board with [`tools/send_update.py`](../tools/send_update.py) (proves reproducibility on both setups)
+- [x] **[Both]** Design and agree on metadata struct & dual-sector layout in [`shared/metadata.md`](../shared/metadata.md)
 - [ ] **[Both]** Delete `stm32/board_test` (agree before removing) and remove `(DRAFT)` status from [`shared/uart_protocol.md`](../shared/uart_protocol.md)
-- [ ] **[Ismail]** Pull `f276934` and repeat the M3 hardware test on Ismail's board with [`tools/send_update.py`](../tools/send_update.py) (proves reproducibility on both setups)
-- [ ] **[Both]** Start M4 together: design metadata struct & dual-sector layout in `shared/`, then implement trial boot + IWDG watchdog rollback
+- [ ] **[Ismail]** Host-side M4 tooling: `tools/metadata.py` (+ unit tests) to pack/inspect `BootMeta` dumps, plus good & deliberately hanging Slot B test images for rollback testing
+- [ ] **[Ronit]** Device-side M4: dual-sector `boot_meta` driver (Sectors 2–3), bootloader trial-boot state machine + IWDG watchdog, and `PENDING` metadata write on `END`
+- [ ] **[Both]** App-side `boot_confirm()` + IWDG petting, then hardware-verify both good confirmation (`TRIAL → CONFIRMED`) and bad rollback (`TRIAL → BAD → Slot A`)
 
 ---
 
@@ -95,6 +98,7 @@ Newest first. One entry per meaningful step forward, linked to its commit.
 
 | Date | What happened | Commit | Who |
 |---|---|---|---|
+| 2026-11-22 | **M3 verified on both boards + M4 started:** repeated M3 UART update on Ismail's board (`app_b.ota`, 8,568 bytes, CRC `0xB68CF200`, clean `ACK` on `END`). Wrote and agreed on [`shared/metadata.md`](../shared/metadata.md) (dual-sector ping-pong `BootMeta` in Sectors 2–3, trial-boot state machine, ~4 s IWDG). | `b2111d4` | Ismail |
 | 2026-11-14 | **M3 done (device side):** bootloader receives App B over UART and writes it to Slot B; `END` re-reads Slot B and verifies CRC-32 against the header. Holding the blue USER button at reset enters update mode. Added `crc32.c`, `flash_slot_b.c` (erases sectors 6–7, writes 4-byte words, refuses addresses outside Slot B), `update_frame.c`, `update_image.c`, `update_session.c` (re-ACKs resent chunks without double-writing), `update_uart.c`. Matches `shared/uart_protocol.md` reason codes 1–8. | `f276934` | Ronit |
 | 2026-10-24 | **Architecture decision:** M6 update server will be written in Go instead of Python (stdlib HTTP server, C-like readability). Packager and UART sender stay in Python. | — | Ismail |
 | 2026-10-24 | **M2 done + M5 prep:** confirmed hardware breakpoints stop in app (`main.c:107`, `0x0801051E`) and bootloader (`main.c:139`, `0x08000646`). Updated `.gitignore` to block signing keys (`*.pem`, `*.key`, `keys/`) ahead of M5. Hit the 6-breakpoint hardware limit (Bug 1). | `18ee3f0` | Ismail |
@@ -234,7 +238,7 @@ Once Milestone 4 works, the IMU Logger becomes a real application in Slot A: rel
 - `stm32/bootloader/` — custom bootloader (`0x08000000`, 32 KB)
 - `stm32/app/` — application project with Slot A (`0x08010000`) and Slot B (`0x08040000`) build configs
 - `stm32/board_test/` — legacy M1 bring-up project (scheduled for deletion)
-- `shared/` — byte-level specs ([`image_format.md`](../shared/image_format.md), [`uart_protocol.md`](../shared/uart_protocol.md))
+- `shared/` — byte-level specs ([`image_format.md`](../shared/image_format.md), [`uart_protocol.md`](../shared/uart_protocol.md), [`metadata.md`](../shared/metadata.md))
 - `tools/` — Python packager, UART sender, fake board, and unit tests
 - `esp32/` — XIAO ESP32-C3 UART link test (M6 Wi-Fi client goes here)
 - `docs/` — this tracker and future failure-test evidence

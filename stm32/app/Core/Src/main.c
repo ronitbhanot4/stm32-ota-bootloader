@@ -36,6 +36,10 @@
 #else
 #define APP_NAME "APP A"
 #endif
+
+/* Define APP_SIMULATE_HANG (or uncomment below) to build a broken test image
+ * that hangs before boot_confirm() and stops petting IWDG, proving M4 rollback. */
+/* #define APP_SIMULATE_HANG */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -94,7 +98,18 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+#ifdef APP_SIMULATE_HANG
+  {
+    const char msg[] = APP_NAME " (HANGING TEST - skipping confirm)\r\n";
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg) - 1, 100);
+    while (1)
+    {
+      __NOP();
+    }
+  }
+#endif
 
+  /* TODO(M4): call boot_confirm() here once boot_meta.c/.h is added */
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -104,6 +119,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    IWDG->KR = 0xAAAAU; /* Pet watchdog (harmless no-op if IWDG is not running) */
     HAL_UART_Transmit(&huart2, (uint8_t *)APP_NAME "\r\n", sizeof(APP_NAME) + 1, 100);
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     HAL_Delay(1000);
