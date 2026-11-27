@@ -1,6 +1,6 @@
 # OTA Bootloader — Project Tracker & Engineering Notebook
 
-**Secure STM32 firmware updates** · **Team:** Ismail Ahmed & Ronit Bhanot · **Last updated:** 2026-11-22
+**Secure STM32 firmware updates** · **Team:** Ismail Ahmed & Ronit Bhanot · **Last updated:** 2026-11-27
 
 > Living team doc. Tracks milestones, progress commits, bugs, failure-test evidence, known debt, and core concepts worth bringing to an interview.
 
@@ -58,7 +58,7 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 | 1 | Set up and prove the board | LED blinks and `"APP A"` prints once a second; both CubeIDE projects exist | Wk 1 (15–21 Oct) | **Done** |
 | 2 | Place and jump to an app | Bootloader prints, then jumps to Slot A; breakpoints work in both projects | Wk 2 (22–28 Oct) | **Done** |
 | 3 | Receive and program a second image | App B arrives over UART, lands in Slot B, read-back CRC matches (not booted yet) | Wk 3 (29 Oct–4 Nov) | **Done** |
-| 4 | Metadata + safe trial boot | Good image becomes active; a broken one rolls back on its own | Wk 4–5 (5–18 Nov) | **In progress** |
+| 4 | Metadata + safe trial boot | Good image becomes active; a broken one rolls back on its own | Wk 4–5 (5–18 Nov) | **Hardware checkpoint verified on Ronit’s board; commit pending** |
 | 5 | Authenticity (signatures) | Signed image installs; a 1-byte change or wrong key is rejected | Wk 6 (19–25 Nov) | **Not started** |
 | 6 | Wi-Fi + server | Signed image downloads over Wi-Fi, trial-boots, confirms, reports status | Wk 7–8 (26 Nov–9 Dec) | **Not started** |
 | — | Failure tests + cleanup | Evidence recorded for every required test below | Wk 9 (10–16 Dec) | **Not started** |
@@ -70,7 +70,9 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 
 ## Status and next steps
 
-**Current snapshot (22 Nov 2026):** M1–M3 are verified on both Ronit's and Ismail's boards. **Milestone 4 is underway:** [`shared/metadata.md`](../shared/metadata.md) (dual-sector ping-pong layout, 64-byte `BootMeta`, and IWDG trial-boot state machine) is agreed on. Next up is implementing the metadata driver, trial boot + IWDG rollback, app `boot_confirm()`, and host-side metadata/test tooling.
+**Current snapshot (27 Nov 2026):** M1–M3 remain complete. Ronit verified the M4 device checkpoint: healthy App B confirms itself; a hanging App B exhausts trial attempts and rolls back automatically to confirmed App A. A simulated torn metadata record is rejected in favor of the older valid copy. Normal App A startup was verified after removing temporary inspection code. Bootloader Debug, App Debug, and App SlotB builds pass with portable shared-folder links. M4 commit/push and partner reproduction remain pending. Physical power-cut tests have not been performed.
+
+**M4 scope:** A → B updates and B → A rollback first, three trial attempts, manual reset after update, shared metadata/CRC code. The receiver preserves confirmed or trial Slot B rather than overwriting it. Reverse-direction updates are not implemented.
 
 ### Checklist
 
@@ -86,9 +88,11 @@ Flash is split into non-overlapping regions. The STM32F4 can only erase a whole 
 - [x] **[Ismail]** Pull `f276934` and repeat the M3 hardware test on Ismail's board with [`tools/send_update.py`](../tools/send_update.py) (proves reproducibility on both setups)
 - [x] **[Both]** Design and agree on metadata struct & dual-sector layout in [`shared/metadata.md`](../shared/metadata.md)
 - [ ] **[Both]** Delete `stm32/board_test` (agree before removing) and remove `(DRAFT)` status from [`shared/uart_protocol.md`](../shared/uart_protocol.md)
-- [ ] **[Ismail]** Host-side M4 tooling: `tools/metadata.py` (+ unit tests) to pack/inspect `BootMeta` dumps, plus good & deliberately hanging Slot B test images for rollback testing
-- [ ] **[Ronit]** Device-side M4: dual-sector `boot_meta` driver (Sectors 2–3), bootloader trial-boot state machine + IWDG watchdog, and `PENDING` metadata write on `END`
-- [ ] **[Both]** App-side `boot_confirm()` + IWDG petting, then hardware-verify both good confirmation (`TRIAL → CONFIRMED`) and bad rollback (`TRIAL → BAD → Slot A`)
+- [x] **[Ismail]** Host metadata build/inspect tooling and tests delivered in `f575d0f`; 13 metadata tests passed. App watchdog refresh and hanging-test option supplied; Ronit built and tested the healthy and hanging Slot B images.
+- [x] **[Ronit]** Device-side M4: dual-sector `boot_meta` driver (Sectors 2–3), bootloader trial-boot state machine + IWDG watchdog, and `PENDING` metadata write on `END`
+- [x] **[Ronit]** App-side confirmation integrated with shared driver; healthy confirmation and hanging-app rollback verified on Ronit’s Nucleo.
+- [ ] **[Ismail]** Reproduce M4 hardware checkpoint after pulling the device commit.
+- [ ] **[Ronit]** Commit and push the verified M4 implementation and evidence.
 
 ---
 
@@ -98,6 +102,8 @@ Newest first. One entry per meaningful step forward, linked to its commit.
 
 | Date | What happened | Commit | Who |
 |---|---|---|---|
+| 2026-11-27 | **M4 hardware checkpoint verified:** shared dual-sector metadata, pending-on-END, three-attempt trial logic, IWDG, app confirmation, and automatic rollback. Simulated torn-record recovery and clean App A restart verified; 14 C tests and all three active build configurations passed. See M4 validation evidence below. | Pending this commit | Ronit |
+| 2026-11-22 | Metadata host tools and 13 tests delivered; app watchdog refresh and hanging-test option prepared. | `f575d0f` | Ismail |
 | 2026-11-22 | **M3 verified on both boards + M4 started:** repeated M3 UART update on Ismail's board (`app_b.ota`, 8,568 bytes, CRC `0xB68CF200`, clean `ACK` on `END`). Wrote and agreed on [`shared/metadata.md`](../shared/metadata.md) (dual-sector ping-pong `BootMeta` in Sectors 2–3, trial-boot state machine, ~4 s IWDG). | `b2111d4` | Ismail |
 | 2026-11-14 | **M3 done (device side):** bootloader receives App B over UART and writes it to Slot B; `END` re-reads Slot B and verifies CRC-32 against the header. Holding the blue USER button at reset enters update mode. Added `crc32.c`, `flash_slot_b.c` (erases sectors 6–7, writes 4-byte words, refuses addresses outside Slot B), `update_frame.c`, `update_image.c`, `update_session.c` (re-ACKs resent chunks without double-writing), `update_uart.c`. Matches `shared/uart_protocol.md` reason codes 1–8. | `f276934` | Ronit |
 | 2026-10-24 | **Architecture decision:** M6 update server will be written in Go instead of Python (stdlib HTTP server, C-like readability). Packager and UART sender stay in Python. | — | Ismail |
@@ -110,6 +116,30 @@ Newest first. One entry per meaningful step forward, linked to its commit.
 | 2026-10-20 | Two-way UART link verified: XIAO sends `'T'` every second, Nucleo toggles LED and replies `'A'`. Wiring: XIAO D6 (TX) → PA10, XIAO D7 (RX) ← PA9, shared GND. | `40b2a8e`, `5dbe781` | Ronit |
 | 2026-10-15 | LED blink bring-up on NUCLEO-F411RE (`stm32/board_test`, HAL). | `95215d0` | Ronit |
 | 2026-10-15 | Repo initialized with `stm32/`, `esp32/`, `tools/`, `docs/` folder layout. | `95209a9`, `322412b` | Ronit |
+
+---
+
+## M4 validation evidence
+
+Verified on Ronit's NUCLEO-F411RE on 27 Nov 2026. The serial and debugger results below summarize the observed outputs.
+
+| Check | Observed result |
+|---|---|
+| Healthy update | App B v4, 11,536 bytes, CRC `0x2FBBDA42`; 46 UART chunks, zero retries, 4.8 seconds. Serial: `BOOT: trial App B`, then repeated `APP B`. |
+| Confirmation | Copy 1 seq 6: B TRIAL, two attempts. Copy 0 seq 7: active B, B CONFIRMED, zero attempts; A remained CONFIRMED. |
+| Controlled rollback setup | Host-created seq 8 selected confirmed A and marked B replaceable. Programmed only metadata sector 3. This setup was not counted as automatic rollback. |
+| Hanging update | App B v5, 8,484 bytes, CRC `0xCFD686CC`; 34 chunks, zero retries, 4.1 seconds. App skipped confirmation and watchdog refresh. |
+| Automatic rollback | Serial showed trial resets, then `BOOT: rolling back to App A` and stable `APP A`. Copy 1 seq 12: B TRIAL, zero attempts. Copy 0 seq 13: active A, A CONFIRMED, B BAD, zero attempts. Sequence progression is consistent with three persisted attempts; serial excerpt captured two trial messages. |
+| Simulated torn write | Programmed Copy 1 with seq 14 but final CRC word left `FFFFFFFF`. Debugger showed `recovery_copy = 0`, metadata seq 13, active A. Temporary inspection code removed afterward. No physical power cut performed. |
+| Clean restart and builds | Clean bootloader flashed; reset selected confirmed App A with stable serial output. Hanging-test flag disabled. Bootloader Debug, App Debug, and App SlotB builds passed after portable links were installed. |
+| Software checks | 14 C metadata tests passed. Earlier 13 Python metadata tests passed. `git diff --check` passed before documentation update. |
+
+The watchdog uses prescaler /64 and reload 2000 (about four seconds at nominal LSI); the exact duration varies with the oscillator. Metadata writes precede trial jumps and final update ACKs. Shared links use `PARENT-2-PROJECT_LOC/shared`, avoiding Ronit's absolute Mac path.
+
+### Significant integration fixes
+
+- A header include path made declarations visible but did not compile linked implementations. Including the Shared source folder in both app configurations resolved undefined metadata load/save references.
+- Absolute Shared links worked locally but were not portable. Replaced them with repository-relative links and rebuilt all three tested configurations successfully.
 
 ---
 
@@ -179,8 +209,9 @@ Breaking the system on purpose and proving it recovers is the real demo. Record 
 | Invalid signature | Sign with a different private key | Signature verification fails; old app keeps running | Not run | — |
 | Interrupted transfer | Unplug UART / drop Wi-Fi mid-download | Old app unaffected; next attempt resumes or restarts cleanly | Not run | — |
 | Power loss while writing | Cut power at repeatable points during flash write | Next boot ignores the half-written image | Not run | — |
-| Trial app hangs | Flash an app that loops forever before confirming | Watchdog resets; rolls back after allowed attempts | Not run | — |
-| Metadata write interrupted | Cut power while saving a new metadata record | Bootloader picks the older valid record, never guesses | Not run | — |
+| Trial app hangs | Flash an app that loops forever before confirming | Watchdog resets; rolls back after allowed attempts | Passed on Ronit’s board | M4 validation evidence above; seq 12 → 13 and serial rollback |
+| Metadata write interrupted | Cut power while saving a new metadata record | Bootloader picks the older valid record, never guesses | Physical cut not run | Simulated torn-record test passed separately below |
+| Simulated torn metadata | Install newer record with final CRC word erased | Older valid copy selected | Passed on Ronit’s board | Copy 1 seq 14 rejected; debugger loaded Copy 0 seq 13 |
 | Oversized image | Package a binary larger than 192 KB | Linker or packager refuses it before sending | Not run | — |
 
 ---
@@ -188,7 +219,7 @@ Breaking the system on purpose and proving it recovers is the real demo. Record 
 ## Interview talking points
 
 ### "Walk me through the project."
-> Thirty seconds: An STM32 bootloader that installs firmware updates safely — it verifies every new image with a CRC-32 and digital signature, trial-boots it under a hardware watchdog, and rolls back automatically to the last confirmed version if the new app fails. Updates arrive over UART or Wi-Fi via an ESP32-C3. Ronit led the STM32 bootloader/flash side and Ismail led the host packager, sender, and Go update server, building and testing every milestone together.
+> Current implementation: An STM32 bootloader receives firmware over UART, checks its CRC, trial-boots it under a hardware watchdog, and rolls back to confirmed App A if App B hangs. Dual-sector metadata preserves an older valid record if the newer record is torn. Ronit leads device firmware and Ismail leads host tooling. Signatures and Wi-Fi delivery are planned for M5 and M6.
 
 ### "What happens if power dies halfway through an update?"
 > The running app lives in the other slot and is never touched until the new image confirms itself. Metadata is stored as two records with sequence numbers and CRCs, so a torn write fails its CRC and the bootloader falls back to the previous valid record.
@@ -200,7 +231,7 @@ Breaking the system on purpose and proving it recovers is the real demo. Record 
 > Read the app's first two words: verify the initial stack pointer points into SRAM (`0x20000000`–`0x20020000`) and the reset handler points inside the target slot. Then disable interrupts, de-init peripherals/clocks, set MSP to the app's stack pointer, point `VTOR` to the app's vector table, and jump to its reset handler.
 
 ### "Why didn't you write your own crypto?"
-> Home-made crypto is where subtle security bugs hide. We use a well-tested library and validate it against standard test vectors on the PC first, then on the STM32.
+> M5 plan: use an established signature implementation and validate standard test vectors before integrating it on the MCU. Cryptographic verification is not implemented yet.
 
 ### Details to have ready
 - Why the flash map follows sector boundaries (STM32F4 erases per whole sector).
@@ -210,7 +241,7 @@ Breaking the system on purpose and proving it recovers is the real demo. Record 
 - Why every `ACK`/`NAK` echoes the frame `type` (`START`, `END`, and `DATA 0` all use `seq 0`, so a late `ACK` for `START` could otherwise be mistaken for `DATA 0`).
 - Why a resent chunk isn't written twice (if an `ACK` is lost, the PC retries; the bootloader sees the duplicate `seq` and re-ACKs without re-programming flash).
 - Why the XIAO saw junk bytes while the STM32 was reflashing (STM32 TX pin goes undriven during reset).
-- What watchdog timeout we chose and why *(fill in during M4)*.
+- IWDG prescaler /64 and reload 2000: about four seconds nominal, allowing metadata confirmation while keeping recovery reasonably fast. Timing varies with LSI tolerance.
 
 ---
 
@@ -219,7 +250,7 @@ Breaking the system on purpose and proving it recovers is the real demo. Record 
 - **`stm32/board_test` still in repo:** throwaway M1 bring-up project (`USER CODE BEGIN 2` markers are still doubled in its `main.c`). Agree and delete it rather than fixing it.
 - **`shared/uart_protocol.md` header still says `DRAFT`:** M3 is now implemented against it (`f276934`); update the header status to finalized.
 - **ESP32 link built ahead of plan:** fine as an early wiring check (`40b2a8e`, `5dbe781`), but pause all Wi-Fi work until M4 rollback is verified.
-- **CubeIDE import noise:** never commit local `.cproject` / `language.settings.xml` churn or stray root `.project` files; discard with `git restore`.
+- **CubeIDE configuration:** commit intentional app/bootloader `.project` and `.cproject` changes needed for shared sources and portable links. Keep unrelated board_test, debugger, and per-machine settings out of the M4 commit; do not discard needed build configuration.
 - **`.gitignore` key protection (done):** blocks `*.pem`, `*.key`, and `keys/` (`18ee3f0`), verified ahead of M5.
 - **192 KB limit enforced twice (done):** both app linker scripts (`LENGTH = 192K`) and `tools/package.py` reject oversized binaries.
 - **Repo layout note:** uses `stm32/`, `esp32/`, `shared/`, `tools/`, `docs/`. Decide where the M6 Go update server will live (e.g., `server/`) before starting M6.

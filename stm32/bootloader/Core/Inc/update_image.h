@@ -11,6 +11,7 @@ typedef enum {
 } UpdateImageStatus;
 
 typedef struct {
+    uint32_t fw_version;
     uint32_t payload_size;
     uint32_t payload_crc32;
 } UpdateImageInfo;

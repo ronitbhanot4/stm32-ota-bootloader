@@ -1,6 +1,7 @@
 #include "update_session.h"
 #include "flash_slot_b.h"
 #include "crc32.h"
+#include "boot_meta_flash.h"
 
 #define SLOT_B_BASE  0x08040000u
 #define CHUNK_SIZE   256u
@@ -22,6 +23,28 @@ uint8_t update_session_start(UpdateSession *session,
     }
 
     session->started = false;
+
+    BootMeta metadata;
+
+    if (boot_meta_flash_load(&metadata) < 0) {
+        return 6u;  // No valid metadata: do not erase.
+    }
+
+    if (metadata.active_slot != 0u
+        || metadata.slot[0].state != SLOT_CONFIRMED
+        || metadata.slot[1].state == SLOT_CONFIRMED
+        || metadata.slot[1].state == SLOT_TRIAL) {
+        return 4u;  // WRONG_SLOT: Slot B must be preserved.
+    }
+
+    // Invalidate an older candidate before erasing its image.
+    if (metadata.slot[1].state == SLOT_PENDING) {
+        metadata.slot[1] = (SlotMeta){0};
+
+        if (!boot_meta_flash_save(&metadata)) {
+            return 6u;  // Could not safely invalidate the old candidate.
+        }
+    }
 
     if (!slot_b_erase()) {
         return 6u;  // FLASH_ERROR
@@ -98,11 +121,50 @@ uint8_t update_session_end(const UpdateSession *session,
 
     if (frame->seq != 0u || frame->length != 0u
         || session->bytes_written != session->image.payload_size) {
-        return 2u;  // Invalid END or chunks still missing.
+        return 2u;  // BAD_SEQ: invalid END or missing data.
     }
 
     const uint8_t *image = (const uint8_t *)(uintptr_t)SLOT_B_BASE;
     uint32_t actual_crc = crc32_ieee(image, session->image.payload_size);
 
-    return actual_crc == session->image.payload_crc32 ? 0u : 7u;
+    if (actual_crc != session->image.payload_crc32) {
+        return 7u;  // IMAGE_CRC
+    }
+
+    BootMeta metadata;
+
+    if (boot_meta_flash_load(&metadata) < 0) {
+        return 6u;  // FLASH_ERROR
+    }
+
+    if (metadata.active_slot != 0u
+        || metadata.slot[0].state != SLOT_CONFIRMED
+        || metadata.slot[1].state == SLOT_CONFIRMED
+        || metadata.slot[1].state == SLOT_TRIAL) {
+        return 4u;  // WRONG_SLOT: preserve the protected image.
+    }
+
+    SlotMeta *slot_b = &metadata.slot[1];
+
+    // A repeated END can be acknowledged without saving again.
+    if (slot_b->state == SLOT_PENDING
+        && slot_b->attempts_left == BOOT_META_MAX_ATTEMPTS
+        && slot_b->fw_version == session->image.fw_version
+        && slot_b->payload_size == session->image.payload_size
+        && slot_b->payload_crc32 == actual_crc) {
+        return 0u;
+    }
+
+    *slot_b = (SlotMeta){0};
+    slot_b->state = SLOT_PENDING;
+    slot_b->attempts_left = BOOT_META_MAX_ATTEMPTS;
+    slot_b->fw_version = session->image.fw_version;
+    slot_b->payload_size = session->image.payload_size;
+    slot_b->payload_crc32 = actual_crc;
+
+    if (!boot_meta_flash_save(&metadata)) {
+        return 6u;  // FLASH_ERROR: do not acknowledge success.
+    }
+
+    return 0u;  // Metadata saved; caller may send ACK.
 }

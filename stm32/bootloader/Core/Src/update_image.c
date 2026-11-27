@@ -37,7 +37,7 @@ UpdateImageStatus update_image_validate_header(const uint8_t *header,
     if (read_le32(&header[20]) != 0x08040000u) {
         return UPDATE_IMAGE_WRONG_SLOT;
     }
-
+    info->fw_version = read_le32(&header[8]);
     info->payload_size = payload_size;
     info->payload_crc32 = read_le32(&header[16]);
     return UPDATE_IMAGE_OK;

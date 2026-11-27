@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "boot_meta_flash.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,7 +64,41 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static bool boot_confirm(void)
+{
+    uint32_t vector_address = (uint32_t)(uintptr_t)g_pfnVectors;
+    unsigned running_slot;
 
+    if (vector_address == 0x08010000u) {
+        running_slot = 0u;
+    } else if (vector_address == 0x08040000u) {
+        running_slot = 1u;
+    } else {
+        return false;
+    }
+
+    BootMeta metadata;
+
+    if (boot_meta_flash_load(&metadata) < 0
+        || metadata.active_slot != running_slot) {
+        return false;
+    }
+
+    SlotMeta *slot = &metadata.slot[running_slot];
+
+    if (slot->state == SLOT_CONFIRMED) {
+        return true;
+    }
+
+    if (slot->state != SLOT_TRIAL) {
+        return false;
+    }
+
+    slot->state = SLOT_CONFIRMED;
+    slot->attempts_left = 0u;
+
+    return boot_meta_flash_save(&metadata);
+}
 /* USER CODE END 0 */
 
 /**
@@ -109,8 +143,14 @@ int main(void)
   }
 #endif
 
-  /* TODO(M4): call boot_confirm() here once boot_meta.c/.h is added */
-  /* USER CODE END 2 */
+  if (!boot_confirm()) {
+      const char msg[] = APP_NAME " confirmation failed\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg) - 1u, 100);
+
+      while (1) {
+          __NOP();
+      }
+  }  /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
